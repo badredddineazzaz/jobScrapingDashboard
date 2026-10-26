@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
 class ContractType(str, Enum):
@@ -52,6 +52,26 @@ class SortBy(str, Enum):
 class JobOffer(BaseModel):
     """Modèle représentant une offre d'emploi."""
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "linkedin_123456",
+                "source": "linkedin",
+                "url": "https://www.linkedin.com/jobs/view/123456",
+                "title": "Développeur Python Senior",
+                "company": "TechCorp",
+                "location": "Paris, France",
+                "description": "Nous recherchons un développeur Python...",
+                "salary_min": 50000,
+                "salary_max": 70000,
+                "contract_type": "cdi",
+                "experience_level": "senior",
+                "remote": True,
+                "skills": ["Python", "Django", "PostgreSQL"],
+            }
+        }
+    )
+
     # Identifiants
     id: str = Field(..., description="Identifiant unique de l'offre")
     source: str = Field(..., description="Source de l'offre (linkedin, indeed, etc.)")
@@ -79,27 +99,6 @@ class JobOffer(BaseModel):
     # Informations supplémentaires
     skills: List[str] = Field(default_factory=list, description="Compétences requises")
     benefits: List[str] = Field(default_factory=list, description="Avantages proposés")
-
-    class Config:
-        """Configuration du modèle."""
-        json_schema_extra = {
-            "example": {
-                "id": "linkedin_123456",
-                "source": "linkedin",
-                "url": "https://www.linkedin.com/jobs/view/123456",
-                "title": "Développeur Python Senior",
-                "company": "TechCorp",
-                "location": "Paris, France",
-                "description": "Nous recherchons un développeur Python...",
-                "salary_min": 50000,
-                "salary_max": 70000,
-                "contract_type": "cdi",
-                "experience_level": "senior",
-                "remote": True,
-                "skills": ["Python", "Django", "PostgreSQL"],
-            }
-        }
-
 
 class SearchCriteria(BaseModel):
     """Critères de recherche d'offres d'emploi."""

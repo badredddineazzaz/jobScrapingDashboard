@@ -9,7 +9,6 @@ from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from jobscraper.config import get_config
 from jobscraper.models.job import (
     ContractType,
     DatePosted,
@@ -18,11 +17,7 @@ from jobscraper.models.job import (
     SortBy,
     WorkplaceType,
 )
-from jobscraper.scrapers.linkedin import LinkedInScraper
-from jobscraper.scrapers.adzuna import AdzunaScraper
-from jobscraper.scrapers.hellowork import HelloWorkScraper
-from jobscraper.scrapers.francetravail import FranceTravailScraper
-from jobscraper.scrapers.wttj import WTTJScraper
+from jobscraper.services.search import SearchEvent, SearchEventType, SearchService
 
 console = Console()
 
@@ -111,8 +106,6 @@ def search(
       # Export JSON avec détails
       jobscraper search -k python -n 100 --details -o jobs.json
     """
-    config = get_config()
-
     # Construire les critères de recherche
     criteria = SearchCriteria(
         keywords=list(keywords) if keywords else [],
@@ -150,74 +143,31 @@ def search(
     if details:
         console.print("[dim]Mode détaillé activé[/dim]")
 
-    # Déterminer les sources à utiliser
-    sources_to_use = set(source)
+    search_service = SearchService()
+    sources_to_use = list(source)
     if "all" in sources_to_use:
-        sources_to_use = {"linkedin", "hellowork", "francetravail", "adzuna", "wttj"}
+        sources_to_use = search_service.available_sources()
     console.print(f"Sources: {', '.join(sources_to_use)}")
 
-    jobs = []
+    def render_progress(event: SearchEvent) -> None:
+        """Render service events without coupling orchestration to Rich."""
 
-    # Scraping LinkedIn
-    if "linkedin" in sources_to_use:
-        with LinkedInScraper({"delay": config.linkedin.delay_between_requests}) as scraper:
-            with console.status("[bold green]Scraping LinkedIn...") as status:
-                for job in scraper.search(criteria):
-                    jobs.append(job)
-                    status.update(f"[bold green]LinkedIn... {len(jobs)} offres trouvées")
+        if event.type == SearchEventType.SOURCE_STARTED:
+            console.print(f"[dim]Démarrage {event.source}...[/dim]")
+        elif event.type == SearchEventType.SOURCE_COMPLETED:
+            console.print(
+                f"[green]{event.source}: {event.source_job_count} offres[/green]"
+            )
+        elif event.type == SearchEventType.SOURCE_FAILED:
+            console.print(f"[red]{event.source}: {event.error}[/red]")
 
-            if details and jobs:
-                linkedin_jobs = [j for j in jobs if j.source == "linkedin"]
-                enriched = []
-                with console.status("[bold cyan]Détails LinkedIn...") as status:
-                    for i, job in enumerate(linkedin_jobs, 1):
-                        status.update(f"[bold cyan]Détails LinkedIn... {i}/{len(linkedin_jobs)}")
-                        job_id = job.id.replace("linkedin_", "")
-                        detailed = scraper.get_job_details(job_id)
-                        enriched.append(detailed if detailed else job)
-                # Remplacer les jobs LinkedIn par les enrichis
-                jobs = [j for j in jobs if j.source != "linkedin"] + enriched
-
-    # Scraping HelloWork
-    if "hellowork" in sources_to_use:
-        with HelloWorkScraper({"delay": config.hellowork.delay_between_requests}) as scraper:
-            with console.status("[bold magenta]Scraping HelloWork...") as status:
-                initial_count = len(jobs)
-                for job in scraper.search(criteria):
-                    jobs.append(job)
-                    status.update(f"[bold magenta]HelloWork... {len(jobs) - initial_count} offres trouvées")
-
-    # Scraping France Travail (ex Pôle Emploi)
-    if "francetravail" in sources_to_use:
-        with FranceTravailScraper({"delay": config.francetravail.delay_between_requests}) as scraper:
-            with console.status("[bold blue]Scraping France Travail...") as status:
-                initial_count = len(jobs)
-                for job in scraper.search(criteria):
-                    jobs.append(job)
-                    status.update(f"[bold blue]France Travail... {len(jobs) - initial_count} offres trouvées")
-
-    # Scraping Adzuna (agrégateur: Indeed, Monster, etc.)
-    if "adzuna" in sources_to_use:
-        import os
-        adzuna_config = {
-            "app_id": os.getenv("ADZUNA_APP_ID"),
-            "app_key": os.getenv("ADZUNA_APP_KEY"),
-        }
-        with AdzunaScraper(adzuna_config) as scraper:
-            with console.status("[bold yellow]Scraping Adzuna (Indeed, Monster...)...") as status:
-                initial_count = len(jobs)
-                for job in scraper.search(criteria):
-                    jobs.append(job)
-                    status.update(f"[bold yellow]Adzuna... {len(jobs) - initial_count} offres trouvées")
-
-    # Scraping Welcome to the Jungle (WTTJ)
-    if "wttj" in sources_to_use:
-        with WTTJScraper({"delay": config.wttj.delay_between_requests}) as scraper:
-            with console.status("[bold red]Scraping Welcome to the Jungle...") as status:
-                initial_count = len(jobs)
-                for job in scraper.search(criteria):
-                    jobs.append(job)
-                    status.update(f"[bold red]WTTJ... {len(jobs) - initial_count} offres trouvées")
+    result = search_service.search(
+        criteria,
+        sources=sources_to_use,
+        include_details=details,
+        on_event=render_progress,
+    )
+    jobs = result.jobs
 
     if not jobs:
         console.print("[yellow]Aucune offre trouvée.[/yellow]")
